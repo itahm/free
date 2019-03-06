@@ -1,101 +1,146 @@
 package com.itahm.free;
 
-import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
+import java.net.BindException;
 import java.nio.charset.StandardCharsets;
 import java.util.Calendar;
-import java.util.Date;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.regex.Pattern;
 
 import com.itahm.http.HTTPListener;
 import com.itahm.http.HTTPServer;
 import com.itahm.http.Request;
-import com.itahm.http.Connection;
+import com.itahm.Agent;
 import com.itahm.http.Response;
-import com.itahm.http.Session;
 import com.itahm.json.JSONException;
 import com.itahm.json.JSONObject;
 
-public class ITAhM extends HTTPServer implements Closeable, HTTPListener {
+public class ITAhM extends HTTPServer implements HTTPListener {
 
 	private byte [] event = null;
 	
-	public ITAhM() throws Exception  {
-		super("0.0.0.0", 2014);
+	public ITAhM(JSONObject config) throws Exception  {
+		super(config);
 		
-		System.out.format("ITAhM HTTP Server started with TCP %d.\n", 2014);
-		
-		if (!Agent.isValidLicense(license)) {
-			throw new Exception("Check your License[1].");
-		}
-		
-		if (root == null || !root.isDirectory()) {
-			throw new Exception("Root not found.");
-		}
-		
-		System.out.format("Root : %s\n", root.getAbsoluteFile());
-		
-		if (expire > 0) {
-			if (Calendar.getInstance().getTimeInMillis() > expire) {
-				throw new Exception("Check your License[2].");
-			}
-			
-			new Timer().schedule(new TimerTask() {
-				
-				@Override
-				public void run() {
-					Agent.close();
-					
-					new Exception("Check your License[3].").printStackTrace();
+		System.out.format("ITAhM HTTP Server started with TCP %d.\n", config.getInt("tcp"));
+	}
+
+	public void init(JSONObject config) {
+		System.setErr(
+			new PrintStream(
+				new OutputStream() {
+
+					@Override
+					public void write(int b) throws IOException {
+					}	
 				}
-			}, new Date(expire));
+			) {
+			
+				@Override
+				public void print(Object e) {
+					StringWriter sw = new StringWriter();
+					PrintWriter pw = new PrintWriter(sw);
+
+					((Exception)e).printStackTrace(pw);
+					
+					Agent.event().put(
+						new JSONObject()
+						.put("origin", "exception")
+						.put("message", sw.toString()), false);
+				}
+			}
+		);
+		
+		System.out.println("ITAhM Agent start.");
+		
+		if (config.has("expire")) {
+			Calendar c = Calendar.getInstance();
+			
+			c.setTimeInMillis(config.getLong("expire"));
+			
+			System.out.format("Expire: %s", String.format("%04d-%02d-%02d %02d:%02d:%02d"
+				, c.get(Calendar.YEAR)
+				, c.get(Calendar.MONTH +1)
+				, c.get(Calendar.DAY_OF_MONTH)
+				, c.get(Calendar.HOUR_OF_DAY)
+				, c.get(Calendar.MINUTE)
+				, c.get(Calendar.SECOND)));
+			
+			System.out.println();
+		}
+		else {
+			System.out.println("Expire: none");
+		}
+		
+		if (config.has("limit")) {
+			System.out.format("Limit: %d", config.getLong("limit"));
+			
+			System.out.println();
+		}
+		else {
+			System.out.println("Limit: none");
+		}
+		
+		System.out.println("License: free");
+		
+		if (config.has("root")) {
+			File root = new File(config.getString("root"));
+			
+			if (!root.isDirectory()) {
+				System.out.println("Check your Configuration.Root");
+				
+				return;
+			}
+		
+			System.out.format("Root : %s\n", root.getAbsoluteFile());
+			
+			Agent.Config.root(root);
+		}
+		else {
+			System.out.println("Check your Configuration.Root");
+			
+			return;
 		}
 		
 		System.out.format("Agent loading...\n");
 		
-		Agent.initialize(root);
-		Agent.setLimit(limit);
-		Agent.setExpire(expire);
-		Agent.setListener(this);
+		Agent.Config.listener(this);
 		
-		Agent.start();
-		
+		try {	
+			Agent.start();
+		} catch (IOException ioe) {
+			System.err.print(ioe);
+			
+			return;
+		}
+	
 		System.out.println("ITAhM agent has been successfully started.");
-	}
-
-	@Override
-	public void close() {
-		Agent.close();
 	}
 	
 	@Override
-	public void doGet(Request request, Response response) {
-		String uri = request.getRequestURI();
-		File file = new File(Agent.root, uri);
-		
-		if (!Pattern.compile("^/data/.*").matcher(uri).matches() && file.isFile()) {
-			try {
-				response.write(file);
-			} catch (IOException e) {
-				response.setStatus(Response.Status.SERVERERROR);
-			}
-		}
-		else {
-			response.setStatus(Response.Status.NOTFOUND);
+	public void close() {
+		try {
+			super.close();
+			
+			Agent.stop();
+		} catch (IOException ioe) {
+			System.err.print(ioe);
 		}
 	}
 	
 	@Override
 	public void doPost(Request request, Response response) {
-		String origin = request.getHeader(Connection.Header.ORIGIN.toString());
+		response.setHeader("Access-Control-Allow-Origin", "http://console.itahm.com");
+		response.setHeader("Access-Control-Allow-Credentials", "true");
 		
-		if (origin != null) {
-			response.setHeader("Access-Control-Allow-Origin", origin);
-			response.setHeader("Access-Control-Allow-Credentials", "true");
+		if (!Agent.ready) {
+			response.setStatus(Response.Status.UNAVAILABLE);
+			
+			return;
 		}
 		
 		JSONObject data;
@@ -107,80 +152,41 @@ public class ITAhM extends HTTPServer implements Closeable, HTTPListener {
 				throw new JSONException("Command not found.");
 			}
 			
-			Session session = request.getSession(false);
-			
 			switch (data.getString("command").toLowerCase()) {
-			case "signin":
-				JSONObject account = null;
-				
-				if (session == null) {
-					account = Agent.signIn(data);
-					
-					if (account == null) {
-						response.setStatus(Response.Status.UNAUTHORIZED);
-					}
-					else {
-						session = request.getSession();
-					
-						session.setAttribute("account", account);
-						session.setMaxInactiveInterval(60 * 60);
-					}
-				}
-				else {
-					account = (JSONObject)session.getAttribute("account");
-				}
-				
-				if (account != null) {
-					response.write(account.toString());
-				}
-				
-				break;
-				
-			case "signout":
-				if (session != null) {
-					session.invalidate();
-				}
-				
-				break;
-				
 			case "listen":
-				if (session == null) {
-					response.setStatus(Response.Status.UNAUTHORIZED);
+				JSONObject event = null;
+				
+				if (data.has("index")) {
+					event = Agent.getEvent(data.getLong("index"));
+					
+				}
+				
+				if (event == null) {
+					synchronized(this) {
+						try {
+							wait();
+						} catch (InterruptedException ie) {
+						}
+						
+						response.write(this.event);
+					}
 				}
 				else {
-					JSONObject event = null;
-					
-					if (data.has("index")) {
-						event = Agent.getEvent(data.getLong("index"));
-						
-					}
-					
-					if (event == null) {
-						synchronized(this) {
-							try {
-								wait();
-							} catch (InterruptedException ie) {
-							}
-							
-							response.write(this.event);
-						}
-					}
-					else {
-						response.write(event.toString().getBytes(StandardCharsets.UTF_8.name()));
-					}
+					response.write(event.toString().getBytes(StandardCharsets.UTF_8.name()));
 				}
+				
+				break;
+			
+			case "debug":
+				System.err.print(new Exception("test"));
 				
 				break;
 				
 			default:
-				if (session == null) {
-					response.setStatus(Response.Status.UNAUTHORIZED);
-				}
-				else if (!Agent.request(data, response)) {
+				if (!Agent.request(data, response)) {
 					throw new JSONException("Command not found.");
 				}
 			}
-					
 		} catch (JSONException | UnsupportedEncodingException e) {
 			response.setStatus(Response.Status.BADREQUEST);
 			
@@ -189,9 +195,12 @@ public class ITAhM extends HTTPServer implements Closeable, HTTPListener {
 		}
 	}
 	
-	public static void main(String[] args) throws Exception {
-		File root = null;
-		int tcp = 2014;
+	public static void main(String[] args) {
+		JSONObject config = new JSONObject()
+			//.put("expire", "0")
+			//.put("limit", "0")
+			//.put("license", "XXXXXXXXXXXX")
+			;
 		
 		for (int i=0, _i=args.length; i<_i; i++) {
 			if (args[i].indexOf("-") != 0) {
@@ -199,13 +208,13 @@ public class ITAhM extends HTTPServer implements Closeable, HTTPListener {
 			}
 			
 			switch(args[i].substring(1).toUpperCase()) {
-			case "PATH":
-				root = new File(args[++i]);
+			case "ROOT":
+				config.put("root", args[++i]);
 				
 				break;
 			case "TCP":
 				try {
-					tcp = Integer.parseInt(args[++i]);
+					config.put("tcp", Integer.parseInt(args[++i]));
 				}
 				catch (NumberFormatException nfe) {}
 				
@@ -213,18 +222,38 @@ public class ITAhM extends HTTPServer implements Closeable, HTTPListener {
 			}
 		}
 		
-		if (root == null) {
-			root = new File(Agent.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getParentFile();
-		}
-		
-		ITAhM itahm = new ITAhM(root, tcp);
+		try {
+			if (!config.has("root")) {
+				config.put("root", new File(Agent.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getParent());
+			}
 			
-		Runtime.getRuntime().addShutdownHook(
-			new Thread() {
-				public void run() {
-					itahm.close();
-				}
-			});
+			try {
+				ITAhM itahm = new ITAhM(config);
+				
+				Runtime.getRuntime().addShutdownHook(
+					new Thread() {
+						public void run() {
+							itahm.close();
+						}
+					});
+			}
+			catch (BindException be) {
+				System.out.format("Error!: Address %d already in use", config.getInt("tcp"));
+				System.out.println();
+				System.out.println("Can not start ITAhM Agent.");
+				
+				throw be;
+			}
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+			
+			try {
+				Thread.sleep(5000);
+			} catch (InterruptedException ie) {
+				ie.printStackTrace();
+			}
+		}
 	}
 
 	@Override
@@ -236,9 +265,10 @@ public class ITAhM extends HTTPServer implements Closeable, HTTPListener {
 				notifyAll();
 			} catch (UnsupportedEncodingException e) {}			
 		}
-		
-		if (broadcast) {
-			// TODO customize for sms or app
-		}
 	}
+
+	@Override
+	public void doGet(Request request, Response response) {
+	}
+
 }
