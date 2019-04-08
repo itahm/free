@@ -156,8 +156,8 @@ public class ITAhM extends HTTPServer implements HTTPListener {
 			case "listen":
 				JSONObject event = null;
 				
-				if (data.has("index")) {
-					event = Agent.getEvent(data.getLong("index"));
+				if (data.has("event")) {
+					event = Agent.getEvent(data.getString("event"));
 					
 				}
 				
@@ -176,12 +176,6 @@ public class ITAhM extends HTTPServer implements HTTPListener {
 				}
 				
 				break;
-			
-			case "debug":
-				System.err.print(new Exception("test"));
-				
-				break;
-				
 			default:
 				if (!Agent.request(data, response)) {
 					throw new JSONException("Command not found.");
@@ -196,11 +190,7 @@ public class ITAhM extends HTTPServer implements HTTPListener {
 	}
 	
 	public static void main(String[] args) {
-		JSONObject config = new JSONObject()
-			//.put("expire", "0")
-			//.put("limit", "0")
-			//.put("license", "XXXXXXXXXXXX")
-			;
+		JSONObject config = new JSONObject();
 		
 		for (int i=0, _i=args.length; i<_i; i++) {
 			if (args[i].indexOf("-") != 0) {
