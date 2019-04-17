@@ -11,15 +11,21 @@ import java.net.BindException;
 import java.nio.charset.StandardCharsets;
 import java.util.Calendar;
 
-import com.itahm.http.HTTPListener;
+import org.snmp4j.PDU;
+import org.snmp4j.smi.OID;
+import org.snmp4j.smi.Variable;
+
 import com.itahm.http.HTTPServer;
 import com.itahm.http.Request;
 import com.itahm.Agent;
+import com.itahm.ITAhMNode;
+import com.itahm.Server;
+import com.itahm.enterprise.Enterprise;
 import com.itahm.http.Response;
 import com.itahm.json.JSONException;
 import com.itahm.json.JSONObject;
 
-public class ITAhM extends HTTPServer implements HTTPListener {
+public class ITAhM extends HTTPServer implements Server {
 
 	private byte [] event = null;
 	
@@ -108,7 +114,7 @@ public class ITAhM extends HTTPServer implements HTTPListener {
 		
 		System.out.format("Agent loading...\n");
 		
-		Agent.Config.listener(this);
+		Agent.Config.server(this);
 		
 		try {	
 			Agent.start();
@@ -259,6 +265,16 @@ public class ITAhM extends HTTPServer implements HTTPListener {
 
 	@Override
 	public void doGet(Request request, Response response) {
+	}
+
+	@Override
+	public void setEnterprisePDU(PDU pdu, String pen) {
+		Enterprise.setEnterprisePDU(pdu, pen);
+	}
+
+	@Override
+	public boolean parseEnterprise(ITAhMNode node, OID response, Variable variable, OID request) {
+		return Enterprise.parseEnterprise(node, response, variable, request);
 	}
 
 }
