@@ -20,7 +20,6 @@ import com.itahm.http.Request;
 import com.itahm.Agent;
 import com.itahm.ITAhMNode;
 import com.itahm.Server;
-import com.itahm.enterprise.Enterprise;
 import com.itahm.http.Response;
 import com.itahm.json.JSONException;
 import com.itahm.json.JSONObject;
@@ -269,12 +268,11 @@ public class ITAhM extends HTTPServer implements Server {
 
 	@Override
 	public void setEnterprisePDU(PDU pdu, String pen) {
-		Enterprise.setEnterprisePDU(pdu, pen);
 	}
 
 	@Override
 	public boolean parseEnterprise(ITAhMNode node, OID response, Variable variable, OID request) {
-		return Enterprise.parseEnterprise(node, response, variable, request);
+		return false;
 	}
 
 }
